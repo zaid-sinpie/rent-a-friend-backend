@@ -1,6 +1,6 @@
 const express = require("express");
 
-const routes = require("./routes");
+const authRoutes = require("./routes/auth.route");
 
 const app = express();
 
@@ -14,7 +14,7 @@ app.get("/", (req, res) => {
   });
 });
 
-app.use("/api", routes);
+app.use("/api/auth", authRoutes);
 
 // 404
 app.use((req, res) => {
