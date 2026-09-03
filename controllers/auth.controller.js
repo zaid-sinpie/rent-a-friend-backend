@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const prisma = require("../config/prisma");
@@ -13,9 +14,11 @@ const signup = async (req, res) => {
       });
     }
 
+    const normalizedEmail = email.trim().toLowerCase();
+
     const existingUser = await prisma.user.findUnique({
       where: {
-        email,
+        email: normalizedEmail,
       },
     });
 
@@ -30,8 +33,8 @@ const signup = async (req, res) => {
 
     const user = await prisma.user.create({
       data: {
-        name,
-        email,
+        name: name.trim(),
+        email: normalizedEmail,
         password: hashedPassword,
       },
     });
@@ -44,20 +47,18 @@ const signup = async (req, res) => {
       process.env.JWT_SECRET,
       {
         expiresIn: "7d",
-      },
+      }
     );
-
-    const userResponse = {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-    };
 
     return res.status(201).json({
       success: true,
       message: "User registered successfully.",
       token,
-      user: userResponse,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+      },
     });
   } catch (error) {
     console.error("Signup Error:", error);
@@ -80,9 +81,11 @@ const login = async (req, res) => {
       });
     }
 
+    const normalizedEmail = email.trim().toLowerCase();
+
     const user = await prisma.user.findUnique({
       where: {
-        email,
+        email: normalizedEmail,
       },
     });
 
@@ -90,6 +93,13 @@ const login = async (req, res) => {
       return res.status(401).json({
         success: false,
         message: "Invalid email or password.",
+      });
+    }
+
+    if (user.status !== "ACTIVE") {
+      return res.status(403).json({
+        success: false,
+        message: "Your account is not active.",
       });
     }
 
@@ -105,42 +115,137 @@ const login = async (req, res) => {
       });
     }
 
-    const token = jwt.sign(
+    // Short-lived access token
+    const accessToken = jwt.sign(
       {
         id: user.id,
         email: user.email,
       },
       process.env.JWT_SECRET,
       {
-        expiresIn: "7d",
+        expiresIn: "15m",
       }
     );
 
+    // Generate a cryptographically secure refresh token
+    const refreshToken = crypto.randomBytes(64).toString("hex");
+
+    // Hash refresh token before storing it
+    const refreshTokenHash = crypto
+      .createHash("sha256")
+      .update(refreshToken)
+      .digest("hex");
+
+    // Refresh token expires in 7 days
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7);
 
-    await prisma.userToken.create({
+    // Store ONLY the hash
+    await prisma.userSession.create({
       data: {
-        token,
         userId: user.id,
+        refreshTokenHash,
         expiresAt,
       },
     });
 
-    const userResponse = {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-    };
-
     return res.status(200).json({
       success: true,
       message: "Login successful.",
-      token,
-      user: userResponse,
+      accessToken,
+      refreshToken,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        status: user.status,
+      },
     });
   } catch (error) {
     console.error("Login Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error.",
+    });
+  }
+};
+
+const refresh = async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      return res.status(401).json({
+        success: false,
+        message: "Refresh token is required.",
+      });
+    }
+
+    // Hash the refresh token received from the client
+    const refreshTokenHash = crypto
+      .createHash("sha256")
+      .update(refreshToken)
+      .digest("hex");
+
+    // Find the session
+    const session = await prisma.userSession.findUnique({
+      where: {
+        refreshTokenHash,
+      },
+      include: {
+        user: true,
+      },
+    });
+
+    if (!session) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid refresh token.",
+      });
+    }
+
+    // Check expiration
+    if (session.expiresAt < new Date()) {
+      await prisma.userSession.delete({
+        where: {
+          id: session.id,
+        },
+      });
+
+      return res.status(401).json({
+        success: false,
+        message: "Refresh token has expired.",
+      });
+    }
+
+    // Check account status
+    if (session.user.status !== "ACTIVE") {
+      return res.status(403).json({
+        success: false,
+        message: "Your account is not active.",
+      });
+    }
+
+    // Generate a new access token
+    const accessToken = jwt.sign(
+      {
+        id: session.user.id,
+        email: session.user.email,
+      },
+      process.env.JWT_SECRET,
+      {
+        expiresIn: "15m",
+      }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Access token refreshed successfully.",
+      accessToken,
+    });
+  } catch (error) {
+    console.error("Refresh Token Error:", error);
 
     return res.status(500).json({
       success: false,
@@ -156,15 +261,27 @@ const logout = async (req, res) => {
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).json({
         success: false,
-        message: "Authentication token is required.",
+        message: "Refresh token is required.",
       });
     }
 
-    const token = authHeader.split(" ")[1];
+    const refreshToken = authHeader.split(" ")[1];
 
-    await prisma.userToken.delete({
+    if (!refreshToken) {
+      return res.status(401).json({
+        success: false,
+        message: "Refresh token is required.",
+      });
+    }
+
+    const refreshTokenHash = crypto
+      .createHash("sha256")
+      .update(refreshToken)
+      .digest("hex");
+
+    await prisma.userSession.deleteMany({
       where: {
-        token,
+        refreshTokenHash,
       },
     });
 
@@ -174,13 +291,6 @@ const logout = async (req, res) => {
     });
   } catch (error) {
     console.error("Logout Error:", error);
-
-    if (error.code === "P2025") {
-      return res.status(401).json({
-        success: false,
-        message: "Token is already invalid or logged out.",
-      });
-    }
 
     return res.status(500).json({
       success: false,
@@ -192,5 +302,6 @@ const logout = async (req, res) => {
 module.exports = {
   signup,
   login,
+  refresh,
   logout,
 };

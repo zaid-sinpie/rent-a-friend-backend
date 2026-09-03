@@ -6,22 +6,235 @@ datasource db {
   provider = "postgresql"
 }
 
-model User {
-  id        Int      @id @default(autoincrement())
-  name      String
-  email     String   @unique
-  password  String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  tokens    UserToken[]
+// ========================================
+// ENUMS
+// ========================================
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
 }
 
-model UserToken {
-  id        Int      @id @default(autoincrement())
-  token     String   @unique
-  userId    Int
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+enum BookingStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+  COMPLETED
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+// ========================================
+// USER
+// ========================================
+
+model User {
+  id       Int        @id @default(autoincrement())
+  name     String
+  email    String     @unique
+  password String
+  status   UserStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // A normal user's profile
+  profile UserProfile?
+
+  // Optional friend/provider profile
+  friendProfile FriendProfile?
+
+  // Login sessions / refresh tokens
+  sessions UserSession[]
+
+  // Bookings made by this user
+  bookingsAsRenter Booking[]
+}
+
+// ========================================
+// USER PROFILE
+// ========================================
+
+model UserProfile {
+  id     Int @id @default(autoincrement())
+  userId Int @unique
+
+  bio       String?
+  avatarUrl String?
+  location  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ========================================
+// FRIEND PROFILE
+// ========================================
+
+model FriendProfile {
+  id     Int @id @default(autoincrement())
+  userId Int @unique
+
+  bio       String?
+  avatarUrl String?
+  location  String?
+
+  age    Int?
+  gender Gender?
+
+  // Price per hour
+  hourlyRate Decimal @db.Decimal(10, 2)
+
+  // Admin verification
+  isVerified Boolean @default(false)
+
+  // Friend can temporarily disable bookings
+  isAvailable Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Services/categories offered
+  categories FriendCategory[]
+
+  // Working/available hours
+  availability FriendAvailability[]
+
+  // Bookings received
+  bookings Booking[]
+}
+
+// ========================================
+// CATEGORY
+// ========================================
+
+model Category {
+  id   Int    @id @default(autoincrement())
+  name String @unique
+
+  friends FriendCategory[]
+
+  createdAt DateTime @default(now())
+}
+
+// ========================================
+// FRIEND CATEGORY
+// Many-to-many relationship
+// Friend <-> Category
+// ========================================
+
+model FriendCategory {
+  friendId   Int
+  categoryId Int
+
+  friend FriendProfile @relation(fields: [friendId], references: [id], onDelete: Cascade)
+
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([friendId, categoryId])
+}
+
+// ========================================
+// FRIEND AVAILABILITY
+// ========================================
+
+model FriendAvailability {
+  id Int @id @default(autoincrement())
+
+  friendId Int
+
+  dayOfWeek DayOfWeek
+
+  // Example: "10:00"
+  startTime String
+
+  // Example: "18:00"
+  endTime String
+
+  createdAt DateTime @default(now())
+
+  friend FriendProfile @relation(fields: [friendId], references: [id], onDelete: Cascade)
+
+  @@unique([friendId, dayOfWeek, startTime, endTime])
+}
+
+// ========================================
+// BOOKING
+// ========================================
+
+model Booking {
+  id Int @id @default(autoincrement())
+
+  // Person renting the friend
+  renterId Int
+
+  // Friend being rented
+  friendId Int
+
+  startTime DateTime
+  endTime   DateTime
+
+  // Save the rate at booking time.
+  // If friend later changes their price,
+  // old bookings remain correct.
+  hourlyRate Decimal @db.Decimal(10, 2)
+
+  totalAmount Decimal @db.Decimal(10, 2)
+
+  status BookingStatus @default(PENDING)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  renter User @relation(fields: [renterId], references: [id])
+
+  friend FriendProfile @relation(fields: [friendId], references: [id])
+
+  @@index([renterId])
+  @@index([friendId])
+  @@index([startTime])
+  @@index([status])
+}
+
+// ========================================
+// USER SESSION
+// ========================================
+
+model UserSession {
+  id Int @id @default(autoincrement())
+
+  userId Int
+
+  // Store the HASH of the refresh token,
+  // never the actual refresh token.
+  refreshTokenHash String @unique
+
   expiresAt DateTime
+
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }

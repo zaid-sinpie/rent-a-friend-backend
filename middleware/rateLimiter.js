@@ -22,7 +22,19 @@ const loginLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+const refreshLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many refresh requests. Please try again later.",
+  },
+});
+
 module.exports = {
   signupLimiter,
   loginLimiter,
+  refreshLimiter,
 };
