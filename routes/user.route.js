@@ -1,15 +1,15 @@
 const express = require("express");
 
-// const userController = require("../controllers/user.controller");
+const userController = require("../controllers/user.controller");
 
 const router = express.Router();
 
-// router.get("/", userController.getUsers);
+router.get("/", getUsersLimiter, userController.getUsers);
 
-// router.get("/:id", userController.getUser);
+router.get("/:id", getUserLimiter, userController.getUser);
 
-// router.put("/:id", userController.updateUser);
+router.put("/:id", updateUserLimiter, userController.updateUser);
 
-// router.delete("/:id", userController.deleteUser);
+router.delete("/:id", deleteUserLimiter, userController.deleteUser);
 
 module.exports = router;
