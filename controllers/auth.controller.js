@@ -115,7 +115,6 @@ const login = async (req, res) => {
       });
     }
 
-    // Short-lived access token
     const accessToken = jwt.sign(
       {
         id: user.id,
@@ -127,20 +126,16 @@ const login = async (req, res) => {
       }
     );
 
-    // Generate a cryptographically secure refresh token
     const refreshToken = crypto.randomBytes(64).toString("hex");
 
-    // Hash refresh token before storing it
     const refreshTokenHash = crypto
       .createHash("sha256")
       .update(refreshToken)
       .digest("hex");
 
-    // Refresh token expires in 7 days
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7);
 
-    // Store ONLY the hash
     await prisma.userSession.create({
       data: {
         userId: user.id,
@@ -182,13 +177,11 @@ const refresh = async (req, res) => {
       });
     }
 
-    // Hash the refresh token received from the client
     const refreshTokenHash = crypto
       .createHash("sha256")
       .update(refreshToken)
       .digest("hex");
 
-    // Find the session
     const session = await prisma.userSession.findUnique({
       where: {
         refreshTokenHash,
@@ -205,7 +198,6 @@ const refresh = async (req, res) => {
       });
     }
 
-    // Check expiration
     if (session.expiresAt < new Date()) {
       await prisma.userSession.delete({
         where: {
@@ -219,7 +211,6 @@ const refresh = async (req, res) => {
       });
     }
 
-    // Check account status
     if (session.user.status !== "ACTIVE") {
       return res.status(403).json({
         success: false,
@@ -227,7 +218,6 @@ const refresh = async (req, res) => {
       });
     }
 
-    // Generate a new access token
     const accessToken = jwt.sign(
       {
         id: session.user.id,
